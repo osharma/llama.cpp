@@ -27,19 +27,22 @@ every change in an interview.
     `claude` is a Standard (non-admin) user made for this project. No sudo.
   - Write only inside `/Users/claude`. Work happens in
     `/Users/claude/llama.cpp-dev` (a clone of the fork).
-  - Other users' home folders (`/Users/osharma`, `/Users/olly`,
-    `/Users/lausone`) are readable but off limits. The only exceptions are
-    the model and CMake paths below, which are read-only.
-  - `/Users/osharma/llama.cpp` (b11497) serves llm-shed on port 8082. Never
-    touch it, its process, or that port. Bind test servers to 127.0.0.1 on
+  - **Never do anything in another user's home folder**, not even reading.
+    Everything we need is our own copy under `/Users/claude`: downloaded
+    fresh, never copied from the user's files.
+  - The user's production llama.cpp (b11497) serves llm-shed on port 8082.
+    Never touch its process or that port. Bind test servers to 127.0.0.1 on
     other ports.
   - Benchmarks run on a shared machine: note in the results log whether
     llm-shed was serving and that the VM was running.
-  - CMake 3.31.9: `/Users/osharma/tools/cmake-3.31.9-macos10.10-universal/CMake.app/Contents/bin`
-    (not on PATH).
-  - Model: `/Users/osharma/models/Qwen3.5-4B-Q4_K_M.gguf` (hybrid: 8 of 32
-    layers have KV cache). Production: `llama-server -t 3 -c 16384`,
-    thinking off.
+  - No tmux. For long jobs use `nohup ... > ~/logs/<name>.log 2>&1 &`.
+  - CMake 3.31.9 (Kitware release tarball, SHA-256 checked):
+    `~/tools/cmake-3.31.9-macos10.10-universal/CMake.app/Contents/bin`
+    (not on PATH; build.sh adds it).
+  - Model: `~/models/Qwen3.5-4B-Q4_K_M.gguf`, from unsloth/Qwen3.5-4B-GGUF
+    at revision e87f176, SHA-256 00fe7986…ef11a4. It is not guaranteed to be
+    byte-identical to the user's production copy. Hybrid: 8 of 32 layers
+    have KV cache. Production: `llama-server -t 3 -c 16384`, thinking off.
 
 ## Repository
 

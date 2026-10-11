@@ -10,7 +10,7 @@ never edited here.
 
 ## Layout
 
-    ~/llama.cpp-dev/            clone of github.com/osharma/llama.cpp, on `lab`
+    ~/llama.cpp-dev/            clone of the fork, on `lab` (Mac: /Users/claude)
       lab/                      scripts, notes, results log (this folder)
       wt/<ref>/                 a git worktree per llama.cpp version we build
       wt/<ref>/build/bin/       its llama-bench and llama-server
