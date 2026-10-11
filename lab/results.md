@@ -254,3 +254,30 @@ for this hybrid model. Only the cold first request pays the full prompt.
   it is slower than the stock path up to 12 rows (-21% at 8, -18% at 9,
   -5% at 12) and faster from 16 rows. The PR text says break-even at 32 rows
   on the author's machine.
+
+---
+
+## 2026-10-11: Q4_0 vs Q4_K_M, context length, tokenization
+
+- Commit: master b11552 (23b0202a), CPU build.
+- Q4_0 model: unsloth/Qwen3.5-4B-GGUF @ e87f176, `Qwen3.5-4B-Q4_0.gguf`,
+  SHA-256 298fcb5f...bd72b8bb, 2.40 GiB. Types: 172 q4_0, 48 q8_0, 24 q5_K,
+  4 q4_1, 1 q6_K (token_embd); CPU_REPACK buffer 1727 MiB.
+- Machine state: production llama-server running (idle), VM running.
+
+| Model | -t | pp512 | tg128 |
+|---|---:|---:|---:|
+| Q4_K_M (baseline entry) | 3 | 27.20 | 6.07-6.32 |
+| Q4_0 | 3 | 21.32 +- 0.09 | 6.69 +- 0.02 |
+| Q4_K_M (baseline entry) | 4 | 34.71 | 6.21 |
+| Q4_0 | 4 | 27.38 +- 0.06 | 6.54 +- 0.08 |
+
+Q4_0: generation +6% (5% fewer bytes), prompt reading -21%. Not worth it.
+
+Context length (Q4_K_M, `llama-bench -p 0 -n 32 -d 0,2000 -r 3 -t 3`):
+tg32 6.17 +- 0.21 at depth 0, 5.58 +- 0.02 at depth 2000 (-10%). This
+explains the server's 5.5 tok/s vs llama-bench's 6.1: the context, not
+server overhead.
+
+Tokenization: `/tokenize` of the 1966-token test document takes 5.4 ms per
+call including HTTP, vs 77 s to process those tokens. Negligible.
