@@ -52,3 +52,41 @@ Reading it:
 - tg barely moves with threads, and the 3-vs-4 order flips between builds,
   inside the noise: generation is memory-bandwidth bound.
 - master vs b11497: no difference beyond the noise in this test.
+
+---
+
+## 2026-10-11: can the GPU (GT 755M, 1 GB) run anything? No.
+
+- Commit: master b11552 (23b0202a), `METAL=1 bash lab/build.sh upstream/master`
+  (`-DGGML_METAL=ON`, build-metal/), built in 299s.
+- `test-backend-ops support -b MTL0` (log: `~/logs/metal-support.log` on the Mac):
+  - GPU family MTLGPUFamilyCommon2; simdgroup reduction = false,
+    simdgroup matrix mul = false, bfloat = false, unified memory = false.
+  - All 34 Metal shader libraries (mul_mv, mul_mm, norm, rope, softmax,
+    gated_delta_net, ...) fail to compile in macOS 10.15's runtime Metal
+    compiler. Top errors: `default initialization of an object of const
+    type` (function constants), `invalid type 'const constant ggml_metal_kargs_* &'
+    for buffer declaration`, `undeclared identifier 'simdgroup_half8x8'`.
+  - Metal context init fails, so test-backend-ops aborts
+    (`GGML_ASSERT(backend != NULL)`). Not one op runs on the GPU, so
+    there is no GPU benchmark.
+
+## 2026-10-11: Qwen3.5-0.8B on the CPU
+
+- Commit: master b11552 (23b0202a), CPU build (same flags as the baseline)
+- Model: `~/models/Qwen3.5-0.8B-Q4_K_M.gguf` (unsloth/Qwen3.5-0.8B-GGUF @ 6ab4614,
+  SHA-256 bd258782…21dc517, 497 MiB)
+- Run: `MODEL=... bash lab/bench.sh upstream/master` (`-p 512 -n 128 -t 3,4 -r 5`)
+- Machine state: production llama-server running (idle), VM running; load
+  2.98 before (the Metal build had just finished).
+
+| Threads | Test | 0.8B | 4B (same commit, earlier today) | 0.8B / 4B |
+|---|---|---:|---:|---:|
+| 3 | pp512 | 153.06 ± 0.42 | 27.20 ± 0.08 | 5.6× |
+| 3 | tg128 | 27.33 ± 0.76 | 6.07 ± 0.35 | 4.5× |
+| 4 | pp512 | 178.56 ± 1.92 | 34.71 ± 0.15 | 5.1× |
+| 4 | tg128 | 26.53 ± 0.43 | 6.21 ± 0.19 | 4.3× |
+
+tg × model size: 27 tok/s × 0.5 GB ≈ 13.5 GB/s, close to the 4B's
+6.2 × 2.5 GB ≈ 15.5 GB/s: both are limited by the same memory bandwidth.
+Quality of the 0.8B on llm-shed's prompts is not tested yet.
