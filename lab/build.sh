@@ -5,7 +5,8 @@
 #
 # The ref is checked out (detached) in wt/<name>/ and built in
 # wt/<name>/build/, so several versions can sit side by side and the lab
-# checkout is never touched. Writes only inside ~/llama.cpp-dev.
+# checkout is never touched. Writes only inside the repo (~/llama.cpp-dev
+# of the Mac's claude user).
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)    # the repo, ~/llama.cpp-dev
@@ -20,7 +21,13 @@ COMMIT=$(git -C "$ROOT" rev-parse --verify "$REF^{commit}")
 FLAGS=(-DCMAKE_BUILD_TYPE=Release -DGGML_METAL=OFF -DGGML_BLAS=OFF -DLLAMA_OPENSSL=OFF)
 
 # Create the worktree, or move an existing one to the requested commit.
+# Guard: if wt/<name> exists but isn't a worktree, git -C would walk up
+# and switch the lab checkout instead, so stop.
 if [ -d "$WT" ]; then
+    if [ "$(git -C "$WT" rev-parse --show-toplevel)" != "$WT" ]; then
+        echo "$WT exists but is not a git worktree; move it aside and rerun."
+        exit 1
+    fi
     git -C "$WT" checkout --quiet --detach "$COMMIT"
 else
     git -C "$ROOT" worktree add --quiet --detach "$WT" "$COMMIT"
