@@ -47,7 +47,7 @@ SECS=$(( $(date +%s) - START ))
 
 # Compact summary to paste back.
 echo "== build $REF =="
-echo "commit:   $(git -C "$WT" describe --tags --always) $(git -C "$WT" log -1 --format='%h %cs %s')"
+echo "commit:   $(git -C "$WT" describe --tags --always) $(git -C "$WT" log -1 --date=short --format='%h %cd %s')"
 echo "flags:    ${FLAGS[*]}"
 echo "compiler: $(cc --version | head -n 1)"
 echo "time:     ${SECS}s"

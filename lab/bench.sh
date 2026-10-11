@@ -31,7 +31,7 @@ LOAD_BEFORE=$(sysctl -n vm.loadavg)
 
 echo "== bench $REF =="
 echo "date:     $(date '+%Y-%m-%d %H:%M')"
-echo "commit:   $(git -C "$WT" describe --tags --always) $(git -C "$WT" log -1 --format='%h %cs')"
+echo "commit:   $(git -C "$WT" describe --tags --always) $(git -C "$WT" log -1 --date=short --format='%h %cd')"
 echo "llm-shed: $SHED (port 8082)"
 echo "load:     $LOAD_BEFORE before"
 echo "args:     -p 512 -n 128 -t $THREADS -r 5 $*"
