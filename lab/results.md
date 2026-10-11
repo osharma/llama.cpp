@@ -110,3 +110,63 @@ Quality of the 0.8B on llm-shed's prompts is not tested yet.
 
 Repacking about half the weights: pp +21%, tg +2% (generation is memory
 bound, so the layout barely matters). Open x86 Q6_K repack PR: #19706.
+
+---
+
+## 2026-10-11: where the time goes (profile) and the memory-bandwidth ceiling
+
+- Commit: master b11552 (23b0202a), CPU build. Model: Qwen3.5-4B Q4_K_M.
+- Machine state: production llama-server running (idle), VM running.
+
+### Weights by type (read from the GGUF header)
+
+| Type | MiB | Share | Tensors |
+|---|---:|---:|---|
+| q4_K | 1298.0 | 49.9% | most matmuls (repacked q4_K_8x8 on x86) |
+| q6_K |  802.9 | 30.8% | token_embd (497 MiB, also the tied output layer), attn_v, ffn_down |
+| q5_K |  495.0 | 19.0% | attn_qkv, ssm_out |
+| q8_0 / f32 | 7.7 | 0.3% | ssm_alpha, ssm_beta, norms |
+
+### RAM read bandwidth (`lab/membw.c`, 1 GiB, best of 5, run twice)
+
+| Threads | 1 | 2 | 3 | 4 |
+|---|---:|---:|---:|---:|
+| GB/s | 16.5 | 21.5 | 22.5 | 22.4 |
+
+DDR3-1600 dual channel spec is 25.6 GB/s; ~22.3 GB/s is reachable.
+Generation ceiling: 22.3 GB/s / 2.73 GB per token = **~8.2 tok/s**.
+Measured tg128 at -t 3: 6.3 tok/s = 17.2 GB/s = 77% of the ceiling.
+
+### Profile: generation (`bash lab/profile.sh upstream/master tg 20`, -t 3)
+
+Self time, % of all samples on all threads:
+
+| % | Function | Note |
+|---:|---|---|
+| 41.9 | ggml_gemv_q4_K_8x8_q8_K | q4_K weights, repacked |
+| 24.1 | ggml_vec_dot_q6_K_q8_K | q6_K weights |
+| 15.6 | ggml_vec_dot_q5_K_q8_K | q5_K weights |
+| 9.5 | ggml_graph_compute_thread | threads waiting for each other (spin) |
+| ~3 | memmove, get_rows, concat | copies of the recurrent state |
+| 2.5 | gated_delta_net (incl. its copies) | Qwen3.5 linear-attention layers |
+
+Matmul time per type matches the bytes per type (q4_K 51% of matmul time vs
+50% of bytes, q6_K 30 vs 31, q5_K 19 vs 19): every kernel is memory bound.
+Estimate: matmuls are ~82% of the time and move 17.2 GB/s overall, so
+~21 GB/s while they run, near the 22.3 ceiling. The gap to 8.2 tok/s is
+mostly the ~10% waiting and ~8% other ops between matmuls.
+
+### Profile: prompt reading (`bash lab/profile.sh upstream/master pp 20`, -t 3)
+
+| % | Function | Note |
+|---:|---|---|
+| 48.3 | ggml_gemm_q4_K_8x8_q8_K | q4_K, repacked |
+| 20.7 | tiled_run_microtile<32,true,0,false> | q5_K, tiled path (`ggml-cpu/tiled/`) |
+| 9.7 | tiled_run_microtile<16,false,32,true> | q6_K, tiled path |
+| 5.7 | ggml_graph_compute_thread | waiting |
+| ~6 | gated_delta_net, vec_dot_f32, concat, ssm_conv | delta-net layers |
+| ~2.5 | tiled_unpack_src0/src1 | tiled path, unpacking |
+
+Work per weight: q4_K 2.42 G weights in 48.3%; q5_K 0.76 G in 21.5%;
+q6_K (without token_embd, used only for the last token) 0.39 G in 10.3%.
+So the tiled q5_K/q6_K path is ~1.3-1.4x slower per weight than repacked q4_K.
