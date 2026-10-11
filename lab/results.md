@@ -200,3 +200,57 @@ Reading it:
   faster than tiled q4_K (estimate; profile at -t 3, bench at -t 4).
 - So q5_K/q6_K at repacked-q4_K speed would cut their ~33% of pp time to
   ~23%: about +10-11% pp512 for this model (estimate).
+
+---
+
+## 2026-10-11: system-level levers: prompt cache, speculative decoding, small batches
+
+- Commits: master b11552 (23b0202a) and b11497, CPU builds. Model: Qwen3.5-4B Q4_K_M.
+- Test server: `bash lab/serve.sh <ref> 8090 [args]` (production flags -t 3 -c 16384,
+  127.0.0.1), requests from `python3 lab/probe.py 8090 cache|gen wt/probe-doc.txt`.
+  Document: first 7000 bytes of docs/build.md = 1966 tokens. Greedy, thinking off.
+- Machine state: production llama-server running (idle), VM running.
+
+### Prompt cache (probe.py cache): works, on master and on b11497 (same numbers)
+
+| Request | Prompt tokens processed | Prompt time |
+|---|---:|---:|
+| 1 doc + Q1 (cold) | 1998 | 77.3 s |
+| 2 identical | 4 | 0.4 s |
+| 3 doc + new question | 23 | 1.8 s |
+| 4 doc + Q1 + answer + follow-up | 70 | 4.5 s |
+| 5 back to doc + Q1 | 22 | 1.7 s |
+
+The model loads once at startup, and a shared prompt start is reused, also
+for this hybrid model. Only the cold first request pays the full prompt.
+
+### Speculative decoding (probe.py gen, 200 tokens max)
+
+| Task | base tok/s | 0.8B draft tok/s (accepted) | ngram-mod tok/s (accepted) |
+|---|---:|---:|---:|
+| summary | 5.48 | 3.57 (96/183) | 5.54 (no drafts) |
+| list | 5.45 | 3.68 (104/179) | 5.49 (no drafts) |
+| quote (copy text) | 5.50 | 6.05 (61/63) | 6.78 (57/64) |
+
+- The 0.8B draft is 33-35% slower on normal answers and only +10% even at
+  97% acceptance. With the draft, the summary and list answers also differ
+  from the base answers (batched math rounds differently); the quote matches.
+- ngram-mod costs nothing when it has no match and gives +23% when the answer
+  copies the prompt.
+
+### Cost of small batches (llama-bench -p N -n 0 -r 3 -t 3)
+
+| Tokens | 1 | 2 | 4 | 6 | 8 | 9 | 12 | 16 | 24 | 32 | 64 | 128 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| tok/s default | 6.14 | 8.32 | 15.78 | 15.03 | 14.03 | 14.37 | 17.76 | 22.01 | 21.31 | 24.94 | 26.53 | 27.08 |
+| tok/s GGML_CPU_TILED_MM=0 | | | 15.28 | 14.97 | 17.79 | 17.51 | 18.65 | 20.49 | 20.68 | 21.13 | 21.53 | 21.70 |
+| tok/s --repack 0 | | | 12.33 | 13.18 | 8.40 | 9.35 | 12.33 | | | | | |
+
+- A batch of 4 costs 1.6x one token, a batch of 8 costs 3.5x: above ~4 tokens
+  the CPU's arithmetic is the limit. That is why speculative decoding gains
+  so little here.
+- The tiled matmul (#27851, merged 2026-09-26, tuned on AVX512-VNNI) turns on
+  at >= 8 rows (`ggml_tiled_min_batch`, tiled.cpp). On Haswell (AVX2, no VNNI)
+  it is slower than the stock path up to 12 rows (-21% at 8, -18% at 9,
+  -5% at 12) and faster from 16 rows. The PR text says break-even at 32 rows
+  on the author's machine.
