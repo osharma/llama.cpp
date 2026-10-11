@@ -90,3 +90,23 @@ Reading it:
 tg × model size: 27 tok/s × 0.5 GB ≈ 13.5 GB/s, close to the 4B's
 6.2 × 2.5 GB ≈ 15.5 GB/s: both are limited by the same memory bandwidth.
 Quality of the 0.8B on llm-shed's prompts is not tested yet.
+
+---
+
+## 2026-10-11: what does CPU repacking give on Haswell? (4B, -t 4)
+
+- Commit: master b11552 (23b0202a), CPU build
+- Run: `THREADS=4 bash lab/bench.sh upstream/master --repack 0,1`
+- Machine state: production llama-server running (idle), VM running.
+- Model tensor types: 131 q4_K, 48 q5_K, 48 q8_0, 22 q6_K, 177 f32.
+  On x86 only q4_K is repacked (q4_K_8x8, AVX2): CPU_REPACK buffer is
+  1298 MiB of the 2.54 GiB model. q5_K, q6_K and q8_0 have repack kernels
+  for ARM only (`ggml/src/ggml-cpu/repack.cpp`, ggml_repack_get_optimal_repack_type).
+
+| repack | pp512 | tg128 |
+|---|---:|---:|
+| 0 | 28.26 +- 0.14 | 5.99 +- 0.06 |
+| 1 | 34.30 +- 0.52 | 6.13 +- 0.05 |
+
+Repacking about half the weights: pp +21%, tg +2% (generation is memory
+bound, so the layout barely matters). Open x86 Q6_K repack PR: #19706.
