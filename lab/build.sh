@@ -2,10 +2,12 @@
 # Build llama-bench and llama-server for one git ref, in its own worktree.
 #
 # Usage: bash lab/build.sh <ref>     e.g. b11497, upstream/master, a branch
+#        METAL=1 bash lab/build.sh upstream/master
 #
 # The ref is checked out (detached) in wt/<name>/ and built in
 # wt/<name>/build/, so several versions can sit side by side and the lab
-# checkout is never touched. Writes only inside the repo (~/llama.cpp-dev
+# checkout is never touched. METAL=1 builds with the GPU (Metal) backend
+# into wt/<name>/build-metal/ instead, plus test-backend-ops. Writes only inside the repo (~/llama.cpp-dev
 # of the Mac's claude user).
 set -eu
 
@@ -17,8 +19,15 @@ NAME=$(printf '%s' "$REF" | tr '/' '-')   # upstream/master -> upstream-master
 WT="$ROOT/wt/$NAME"
 COMMIT=$(git -C "$ROOT" rev-parse --verify "$REF^{commit}")
 
-# Same flags as the production build in ~/llama.cpp.
+# Same flags as the production build in ~/llama.cpp, unless METAL=1.
+BUILD="$WT/build"
+TARGETS=(llama-bench llama-server)
 FLAGS=(-DCMAKE_BUILD_TYPE=Release -DGGML_METAL=OFF -DGGML_BLAS=OFF -DLLAMA_OPENSSL=OFF)
+if [ "${METAL:-0}" = 1 ]; then
+    BUILD="$WT/build-metal"
+    TARGETS+=(test-backend-ops)          # compares GPU results with the CPU
+    FLAGS=(-DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_BLAS=OFF -DLLAMA_OPENSSL=OFF)
+fi
 
 # Create the worktree, or move an existing one to the requested commit.
 # Guard: if wt/<name> exists but isn't a worktree, git -C would walk up
@@ -34,11 +43,11 @@ else
 fi
 
 # Configure and build. Output goes to log files; on failure show the end.
-mkdir -p "$WT/build"
-LOG="$WT/build/lab-build.log"
+mkdir -p "$BUILD"
+LOG="$BUILD/lab-build.log"
 START=$(date +%s)
-if ! { cmake -S "$WT" -B "$WT/build" "${FLAGS[@]}" &&
-       cmake --build "$WT/build" --target llama-bench llama-server -j 4; } > "$LOG" 2>&1; then
+if ! { cmake -S "$WT" -B "$BUILD" "${FLAGS[@]}" &&
+       cmake --build "$BUILD" --target "${TARGETS[@]}" -j 4; } > "$LOG" 2>&1; then
     tail -n 30 "$LOG"
     echo "BUILD FAILED for $REF (full log: $LOG)"
     exit 1
@@ -51,4 +60,4 @@ echo "commit:   $(git -C "$WT" describe --tags --always) $(git -C "$WT" log -1 -
 echo "flags:    ${FLAGS[*]}"
 echo "compiler: $(cc --version | head -n 1)"
 echo "time:     ${SECS}s"
-echo "bins:     $WT/build/bin"
+echo "bins:     $BUILD/bin"
