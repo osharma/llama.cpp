@@ -170,3 +170,33 @@ mostly the ~10% waiting and ~8% other ops between matmuls.
 Work per weight: q4_K 2.42 G weights in 48.3%; q5_K 0.76 G in 21.5%;
 q6_K (without token_embd, used only for the last token) 0.39 G in 10.3%.
 So the tiled q5_K/q6_K path is ~1.3-1.4x slower per weight than repacked q4_K.
+
+---
+
+## 2026-10-11: MUL_MAT speed per quant type (test-backend-ops perf)
+
+- Commit: master b11552 (23b0202a), CPU build, `test-backend-ops` target.
+- Run: `test-backend-ops perf -b CPU -o MUL_MAT -p "type_a=(q4_0|q8_0|q4_K|q5_K|q6_K),type_b=f32,m=4096,n=512,k=14336,"`,
+  then the same with `GGML_CPU_TILED_MM=0`. One 4096x14336 weight matrix
+  times a 512-token batch (prompt-reading shape), 60.13 GFLOP per run.
+- test-backend-ops uses hardware_concurrency/2 = **2 threads** here, and
+  plain CPU buffers (no repacking), so repacked q4_K is not in this table.
+- Machine state: production llama-server running (idle), VM running.
+
+| Type | Path (default) | GFLOPS | GFLOPS with TILED_MM=0 | tiled speed-up |
+|---|---|---:|---:|---:|
+| q4_0 | llamafile sgemm | 70.8 | 70.6 | - |
+| q8_0 | llamafile sgemm | 87.8 | 86.3 | - |
+| q4_K | tiled | 122.3 | 86.2 (vec_dot) | 1.42x |
+| q5_K | tiled | 120.9 | 66.7 (vec_dot) | 1.81x |
+| q6_K | tiled | 128.8 | 73.6 (vec_dot) | 1.75x |
+
+Reading it:
+- The tiled path runs q4_K, q5_K and q6_K at the same speed. q5_K/q6_K are
+  not slow inside the tiled path.
+- The gap in the model profile is tiled vs repacked: with `--repack 0`, q4_K
+  falls back to the tiled path and pp512 drops 34.30 -> 28.26 (earlier
+  entry). With q4_K at 48.3% of pp time, that makes repacked q4_K ~1.44x
+  faster than tiled q4_K (estimate; profile at -t 3, bench at -t 4).
+- So q5_K/q6_K at repacked-q4_K speed would cut their ~33% of pp time to
+  ~23%: about +10-11% pp512 for this model (estimate).
